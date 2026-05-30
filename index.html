@@ -53,9 +53,29 @@
     border-radius: 14px;
     padding: 16px 16px 14px;
     z-index: 10;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     transition: opacity .35s ease, transform .35s ease;
   }
+  #panel::-webkit-scrollbar { width: 6px; }
+  #panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); border-radius: 3px; }
   #panel.hidden { opacity: 0; transform: translateX(-12px); pointer-events: none; }
+
+  /* floating toggle — the touch way to show/hide the panel (no keyboard needed) */
+  #toggle {
+    position: fixed; top: 16px; right: 16px; z-index: 12;
+    width: 46px; height: 46px; border-radius: 13px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; line-height: 1; color: var(--ui-text);
+    background: var(--ui-bg); border: 1px solid var(--ui-border);
+    backdrop-filter: blur(14px) saturate(140%); -webkit-backdrop-filter: blur(14px) saturate(140%);
+    cursor: pointer; transition: background .15s, border-color .15s, transform .15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #toggle:hover { background: rgba(255,255,255,0.13); }
+  #toggle:active { transform: scale(0.94); }
 
   .title {
     font-size: 15px; font-weight: 600; letter-spacing: 0.5px;
@@ -157,15 +177,35 @@
   }
   .hint.fade { opacity: 0; }
   .hint b { color: var(--ui-text); font-weight: 600; }
+  .hint .touch-only { display: none; }
+
+  /* coarse pointers (touch): bigger, easier-to-grab controls */
+  @media (pointer: coarse) {
+    input[type=range] { height: 6px; }
+    input[type=range]::-webkit-slider-thumb { width: 24px; height: 24px; }
+    input[type=range]::-moz-range-thumb { width: 24px; height: 24px; }
+    .seg .tool { font-size: 17px; padding: 11px 0; }
+    button { padding: 11px 6px; }
+    .swatch { width: 34px; height: 34px; }
+    .hint .key-only { display: none; }
+    .hint .touch-only { display: inline; }
+  }
 
   @media (max-width: 560px) {
-    #panel { width: calc(100vw - 32px); }
+    #panel {
+      top: 12px; left: 12px; right: 78px; width: auto;
+      max-height: calc(100vh - 24px);
+    }
+    #panel.hidden { transform: translateX(0) translateY(-10px); }
+    .hint { font-size: 11px; max-width: calc(100vw - 24px); white-space: normal; text-align: center; }
   }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <canvas id="o"></canvas>
+
+<button id="toggle" aria-label="Show or hide controls">≡</button>
 
 <div id="panel">
   <div class="title">Driftfield <small>generative flow</small></div>
@@ -225,7 +265,8 @@
 <div id="toast"></div>
 
 <div class="hint" id="hint">
-  <b>Move</b> to steer · <b>Pin</b> tools to sculpt · <b>A</b> auto · <b>S</b> sound · <b>H</b> hide · <b>Space</b> new field
+  <span class="key-only"><b>Move</b> to steer · <b>Pin</b> tools to sculpt · <b>A</b> auto · <b>S</b> sound · <b>H</b> hide · <b>Space</b> new field</span>
+  <span class="touch-only"><b>Drag</b> to steer · pick a <b>pin tool</b> then tap the field · <b>≡</b> for controls</span>
 </div>
 
 <script>
@@ -775,29 +816,45 @@
     const t = e.touches ? e.touches[0] : e;
     mouse.x = t.clientX; mouse.y = t.clientY; mouse.active = true;
   }
+  const UI_SEL = '#panel, #toggle, #hint, #toast';
+  function onUI(e) { return e.target.closest && e.target.closest(UI_SEL); }
+  let lastTouch = 0;
+
   function pointerDown(e) {
-    if (e.target.closest && e.target.closest('#panel')) return; // don't paint through the UI
+    if (onUI(e)) return;                 // don't paint through the UI
     setMouse(e);
     if (tool === 'steer') { mouse.repel = true; }
     else if (tool === 'erase') { eraseNear(mouse.x, mouse.y); }
     else { placeNode(mouse.x, mouse.y, tool); }
   }
   window.addEventListener('mousemove', setMouse);
-  window.addEventListener('mousedown', pointerDown);
+  window.addEventListener('mousedown', e => {
+    if (performance.now() - lastTouch < 700) return;   // ignore mouse events synthesized from a touch
+    pointerDown(e);
+  });
   window.addEventListener('mouseup',   () => { mouse.repel = false; });
   window.addEventListener('mouseleave',() => { mouse.active = false; });
-  window.addEventListener('touchstart', e => { if (!(e.target.closest && e.target.closest('#panel'))) pointerDown(e); }, { passive: true });
-  window.addEventListener('touchmove',  setMouse, { passive: true });
-  window.addEventListener('touchend',   () => { mouse.repel = false; mouse.active = false; });
+  window.addEventListener('touchstart', e => { lastTouch = performance.now(); if (!onUI(e)) pointerDown(e); }, { passive: true });
+  window.addEventListener('touchmove',  e => { lastTouch = performance.now(); if (!onUI(e)) setMouse(e); }, { passive: true });
+  window.addEventListener('touchend',   () => { lastTouch = performance.now(); mouse.repel = false; mouse.active = false; });
+
+  // ---------- Panel show / hide (floating button + H key) ----------
+  const panel = document.getElementById('panel');
+  const toggleBtn = document.getElementById('toggle');
+  function setPanel(hidden) {
+    panelHidden = hidden;
+    panel.classList.toggle('hidden', hidden);
+    toggleBtn.textContent = hidden ? '≡' : '✕';
+  }
+  function togglePanel() { setPanel(!panelHidden); }
+  toggleBtn.addEventListener('click', togglePanel);
 
   // ---------- Keyboard ----------
-  const panel = document.getElementById('panel');
   const TOOL_KEYS = { '1': 'steer', '2': 'attract', '3': 'repel', '4': 'vortex', '5': 'erase' };
   window.addEventListener('keydown', e => {
     const k = e.key.toLowerCase();
     if (k === 'h') {
-      panelHidden = !panelHidden;
-      panel.classList.toggle('hidden', panelHidden);
+      togglePanel();
     } else if (e.code === 'Space') {
       e.preventDefault();
       newField();
@@ -983,6 +1040,9 @@
     applyState(CURATED);     // first-time visitors land mid-composition
     prewarm(240);            // ...already textured, not building from black
   }
+  // On touch / small screens, start collapsed so the field is visible (tap ≡ to open).
+  const startCollapsed = window.matchMedia('(pointer: coarse)').matches || window.innerWidth <= 560;
+  setPanel(startCollapsed);   // also syncs the toggle button's glyph (≡ / ✕)
   step();
   if (/[?&]poster/.test(location.search)) setTimeout(() => renderPoster(), 400);
 })();
