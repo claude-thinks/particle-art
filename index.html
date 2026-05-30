@@ -3,7 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Driftfield</title>
+<title>Driftfield — a generative art toy</title>
+<meta name="description" content="Thousands of particles drift along an invisible, ever-shifting current. Sculpt it with attractors and vortices, let it play itself, and share any field you make as a link.">
+<meta name="theme-color" content="#070a12">
+<meta name="author" content="Claude">
+
+<!-- Open Graph / social preview -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Driftfield — a generative art toy">
+<meta property="og:description" content="Thousands of particles drift along an invisible, ever-shifting current. Sculpt it, let it play itself, and share any field you make as a link.">
+<meta property="og:url" content="https://claude-thinks.github.io/particle-art/">
+<meta property="og:image" content="https://claude-thinks.github.io/particle-art/driftfield-og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Driftfield — a generative art toy">
+<meta name="twitter:description" content="Thousands of particles drift along an invisible, ever-shifting current. Sculpt it, let it play itself, and share any field you make as a link.">
+<meta name="twitter:image" content="https://claude-thinks.github.io/particle-art/driftfield-og.png">
 <style>
   :root {
     --ui-bg: rgba(18, 18, 22, 0.72);
@@ -244,6 +260,12 @@
     { root: 57, steps: [0, 2, 4, 7, 9] },  // Spectra  — A major pentatonic
   ];
 
+  // A hand-tuned composition first-time visitors land on (and the source of the social poster).
+  const CURATED = {
+    v: 1, p: 0, c: 3200, s: 1.15, sp: 1.05, d: 0.5, f: 0.985, sd: 7,
+    n: [[0.40, 0.46, 2], [0.68, 0.58, 2], [0.84, 0.30, 0], [0.16, 0.70, 0]],
+  };
+
   // ---------- State ----------
   const params = {
     count: 2400, scale: 1.4, speed: 1.0, drift: 0.4, fade: 0.96, palette: 0,
@@ -365,7 +387,7 @@
   }
 
   // ---------- Main loop ----------
-  function step() {
+  function simulateFrame() {
     // Fade trails toward background (creates the painterly fade)
     const bg = hexToRgb(PALETTES[params.palette].bg);
     ctx.fillStyle = `rgba(${bg[0]},${bg[1]},${bg[2]},${1 - params.fade})`;
@@ -449,15 +471,21 @@
       ctx.stroke();
     }
 
+    return recycles;
+  }
+
+  function step() {
+    const recycles = simulateFrame();
     frame++;
     activity = activity * 0.92 + recycles * 0.08;
-
     drawOverlay();
     if (autoMode.on) autoTick();
     audio.tick(activity);
-
     requestAnimationFrame(step);
   }
+
+  // Build up trails before the first visible frame so the landing looks composed instantly.
+  function prewarm(n) { for (let i = 0; i < n; i++) simulateFrame(); }
 
   // ---------- Overlay: pin markers + tool cursor ----------
   function drawOverlay() {
@@ -836,9 +864,82 @@
   function encodeState() { return encodeURIComponent(JSON.stringify(serializeState())); }
   function restoreFromHash() {
     const m = location.hash.match(/art=([^&]+)/);
-    if (!m) return;
-    try { applyState(JSON.parse(decodeURIComponent(m[1]))); } catch (e) { /* ignore bad links */ }
+    if (!m) return false;
+    try { applyState(JSON.parse(decodeURIComponent(m[1]))); return true; }
+    catch (e) { return false; /* ignore bad links */ }
   }
+
+  // ---------- Poster: render a clean, high-contrast still for social previews ----------
+  // Reuses the field's own math (no UI, no pin markers) into an offscreen 1200×630 canvas,
+  // then downloads it as driftfield-og.png. Trigger with ?poster, or press P.
+  function renderPoster(state) {
+    state = state || CURATED;
+    const PW = 1200, PH = 630, SS = 2;            // supersample for crisp strokes
+    const off = document.createElement('canvas');
+    off.width = PW * SS; off.height = PH * SS;
+    const o = off.getContext('2d');
+    o.scale(SS, SS);
+
+    const pal = PALETTES[state.p];
+    const palc = pal.colors.map(hexToRgb);
+    const bg = hexToRgb(pal.bg);
+    const colAt = (t) => {
+      const n = palc.length, f = Math.max(0, Math.min(0.9999, t)) * (n - 1), i = f | 0, k = f - i;
+      const a = palc[i], b = palc[Math.min(i + 1, n - 1)];
+      return [(a[0] + (b[0] - a[0]) * k) | 0, (a[1] + (b[1] - a[1]) * k) | 0, (a[2] + (b[2] - a[2]) * k) | 0];
+    };
+
+    const N = 3400, FRAMES = 950;
+    const ps = [];
+    const spawnP = (p) => { p.x = Math.random() * PW; p.y = Math.random() * PH; p.life = 80 + Math.random() * 280; p.age = 0; p.col = Math.random(); p.px = p.x; p.py = p.y; return p; };
+    for (let i = 0; i < N; i++) ps.push(spawnP({}));
+    const pn = (state.n || []).map(a => ({ x: a[0] * PW, y: a[1] * PH, type: NODE_TYPES[a[2]] || 'attract', r: 150, strength: 1 }));
+
+    const savedSeed = fieldSeed;
+    seedNoise(state.sd);                          // deterministic field
+
+    o.fillStyle = pal.bg; o.fillRect(0, 0, PW, PH);
+    o.lineWidth = 1.0; o.lineCap = 'round';
+
+    let z = 0;
+    const sc = state.s * 0.0016, spd = state.sp * 1.6;
+    for (let f = 0; f < FRAMES; f++) {
+      o.fillStyle = `rgba(${bg[0]},${bg[1]},${bg[2]},${1 - state.f})`;
+      o.fillRect(0, 0, PW, PH);
+      z += 0.0009 * state.d;
+      for (let i = 0; i < N; i++) {
+        const p = ps[i];
+        const ang = noise3(p.x * sc, p.y * sc, z) * Math.PI * 3.0;
+        let vx = Math.cos(ang) * spd, vy = Math.sin(ang) * spd;
+        for (let k = 0; k < pn.length; k++) {
+          const nd = pn[k], dx = p.x - nd.x, dy = p.y - nd.y, d2 = dx * dx + dy * dy;
+          if (d2 < nd.r * nd.r) {
+            const d = Math.sqrt(d2) || 1, fc = (1 - d / nd.r) * nd.strength;
+            if (nd.type === 'attract') { vx -= dx / d * fc * 3.2; vy -= dy / d * fc * 3.2; vx += -dy / d * fc * 2.4; vy += dx / d * fc * 2.4; }
+            else if (nd.type === 'repel') { vx += dx / d * fc * 4.2; vy += dy / d * fc * 4.2; }
+            else { vx += -dy / d * fc * 4.4; vy += dx / d * fc * 4.4; vx -= dx / d * fc * 0.6; vy -= dy / d * fc * 0.6; }
+          }
+        }
+        p.px = p.x; p.py = p.y; p.x += vx; p.y += vy; p.age++;
+        if (p.x < 0 || p.x > PW || p.y < 0 || p.y > PH || p.age > p.life) { spawnP(p); continue; }
+        const c = colAt(p.col), lt = p.age / p.life;
+        const alpha = 0.22 + 0.42 * Math.sin(lt * Math.PI);   // brighter than the live view
+        o.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},${alpha})`;
+        o.beginPath(); o.moveTo(p.px, p.py); o.lineTo(p.x, p.y); o.stroke();
+      }
+    }
+
+    seedNoise(savedSeed);                         // restore the live field
+
+    off.toBlob((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.download = 'driftfield-og.png'; a.href = url; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast('Poster saved as driftfield-og.png');
+    }, 'image/png');
+  }
+  window.addEventListener('keydown', (e) => { if (e.key === 'p' || e.key === 'P') renderPoster(); });
 
   function copyText(text) {
     if (navigator.clipboard && window.isSecureContext) {
@@ -878,8 +979,12 @@
   buildPalCache();
   resize();
   rebuildParticles();
-  restoreFromHash();
+  if (!restoreFromHash()) {
+    applyState(CURATED);     // first-time visitors land mid-composition
+    prewarm(240);            // ...already textured, not building from black
+  }
   step();
+  if (/[?&]poster/.test(location.search)) setTimeout(() => renderPoster(), 400);
 })();
 </script>
 </body>
