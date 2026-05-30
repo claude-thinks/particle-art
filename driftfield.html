@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Driftfield</title>
+<style>
+  :root {
+    --ui-bg: rgba(18, 18, 22, 0.72);
+    --ui-border: rgba(255, 255, 255, 0.10);
+    --ui-text: rgba(255, 255, 255, 0.88);
+    --ui-dim: rgba(255, 255, 255, 0.45);
+    --accent: #8ab4ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: #000; }
+  body {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: var(--ui-text);
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: crosshair;
+  }
+  canvas { display: block; position: fixed; inset: 0; }
+  #o { pointer-events: none; z-index: 5; }
+
+  /* ---- Control panel ---- */
+  #panel {
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    width: 248px;
+    background: var(--ui-bg);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid var(--ui-border);
+    border-radius: 14px;
+    padding: 16px 16px 14px;
+    z-index: 10;
+    transition: opacity .35s ease, transform .35s ease;
+  }
+  #panel.hidden { opacity: 0; transform: translateX(-12px); pointer-events: none; }
+
+  .title {
+    font-size: 15px; font-weight: 600; letter-spacing: 0.5px;
+    display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px;
+  }
+  .title small { font-size: 10px; font-weight: 400; color: var(--ui-dim); letter-spacing: 0; }
+  .subtitle { font-size: 10.5px; color: var(--ui-dim); margin-bottom: 14px; line-height: 1.4; }
+
+  .row { margin-bottom: 12px; }
+  .row label {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 10.5px; color: var(--ui-dim); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.6px;
+  }
+  .row label .val { color: var(--ui-text); font-variant-numeric: tabular-nums; }
+
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 4px; border-radius: 4px;
+    background: rgba(255,255,255,0.14); outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--ui-text); cursor: pointer;
+    box-shadow: 0 0 0 0 rgba(138,180,255,0); transition: box-shadow .2s;
+  }
+  input[type=range]::-webkit-slider-thumb:hover { box-shadow: 0 0 0 5px rgba(138,180,255,0.18); }
+  input[type=range]::-moz-range-thumb {
+    width: 14px; height: 14px; border: none; border-radius: 50%; background: var(--ui-text); cursor: pointer;
+  }
+
+  .palettes { display: flex; flex-wrap: wrap; gap: 6px; }
+  .swatch {
+    width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
+    border: 2px solid transparent; transition: transform .15s, border-color .15s;
+    background-size: cover;
+  }
+  .swatch:hover { transform: scale(1.08); }
+  .swatch.active { border-color: var(--ui-text); }
+
+  .btns { display: flex; gap: 6px; margin-top: 4px; }
+  button {
+    flex: 1; font-family: inherit; font-size: 10.5px; letter-spacing: 0.4px;
+    color: var(--ui-text); background: rgba(255,255,255,0.06);
+    border: 1px solid var(--ui-border); border-radius: 8px;
+    padding: 8px 6px; cursor: pointer; transition: background .15s, border-color .15s;
+    text-transform: uppercase;
+  }
+  button:hover { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.22); }
+  button:active { transform: translateY(1px); }
+  button.on {
+    background: rgba(138,180,255,0.22); border-color: rgba(138,180,255,0.55); color: #eaf1ff;
+  }
+
+  /* segmented tool selector */
+  .seg { display: flex; gap: 4px; background: rgba(255,255,255,0.05);
+    border: 1px solid var(--ui-border); border-radius: 9px; padding: 3px; }
+  .seg .tool {
+    flex: 1; text-align: center; font-size: 14px; line-height: 1; padding: 7px 0;
+    border-radius: 6px; cursor: pointer; color: var(--ui-dim);
+    transition: background .15s, color .15s; position: relative;
+  }
+  .seg .tool:hover { color: var(--ui-text); background: rgba(255,255,255,0.07); }
+  .seg .tool.active { color: #eaf1ff; background: rgba(138,180,255,0.22); }
+  .seg .tool .tip {
+    position: absolute; bottom: -22px; left: 50%; transform: translateX(-50%);
+    font-size: 9px; letter-spacing: .4px; color: var(--ui-dim);
+    opacity: 0; pointer-events: none; transition: opacity .15s; white-space: nowrap; text-transform: uppercase;
+  }
+  .seg .tool:hover .tip { opacity: 1; }
+
+  .pincount { font-size: 9.5px; color: var(--ui-dim); margin-top: 6px; text-align: right; }
+  .pincount b { color: var(--ui-text); }
+
+  #share { width: 100%; margin-top: 6px; }
+  .sig {
+    margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--ui-border);
+    font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase;
+    color: rgba(255,255,255,0.32); text-align: center;
+  }
+
+  /* toast */
+  #toast {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%) translateY(-16px);
+    background: rgba(138,180,255,0.16); border: 1px solid rgba(138,180,255,0.45);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    color: #eaf1ff; font-size: 11px; letter-spacing: .4px;
+    padding: 9px 18px; border-radius: 22px; z-index: 20;
+    opacity: 0; pointer-events: none; transition: opacity .3s, transform .3s;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .hint {
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    font-size: 10.5px; color: var(--ui-dim); z-index: 10;
+    background: var(--ui-bg); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    padding: 6px 14px; border-radius: 20px; border: 1px solid var(--ui-border);
+    transition: opacity .4s; white-space: nowrap;
+  }
+  .hint.fade { opacity: 0; }
+  .hint b { color: var(--ui-text); font-weight: 600; }
+
+  @media (max-width: 560px) {
+    #panel { width: calc(100vw - 32px); }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="o"></canvas>
+
+<div id="panel">
+  <div class="title">Driftfield <small>generative flow</small></div>
+  <div class="subtitle">Thousands of particles drift along an invisible, ever-shifting current. Pin attractors into the field, or let it drift on its own.</div>
+
+  <div class="row">
+    <label>Tool</label>
+    <div class="seg" id="tools">
+      <div class="tool active" data-tool="steer"  title="Steer">↜<span class="tip">steer</span></div>
+      <div class="tool"        data-tool="attract" title="Attractor">◉<span class="tip">attract</span></div>
+      <div class="tool"        data-tool="repel"   title="Repeller">◌<span class="tip">repel</span></div>
+      <div class="tool"        data-tool="vortex"  title="Vortex">✺<span class="tip">vortex</span></div>
+      <div class="tool"        data-tool="erase"   title="Erase">⌫<span class="tip">erase</span></div>
+    </div>
+    <div class="pincount" id="pincount">no pins · <b>click</b> the field to place</div>
+  </div>
+
+  <div class="row">
+    <label>Particles <span class="val" id="vCount">2400</span></label>
+    <input type="range" id="count" min="200" max="6000" step="100" value="2400">
+  </div>
+  <div class="row">
+    <label>Flow scale <span class="val" id="vScale">1.40</span></label>
+    <input type="range" id="scale" min="0.3" max="4" step="0.05" value="1.4">
+  </div>
+  <div class="row">
+    <label>Speed <span class="val" id="vSpeed">1.00</span></label>
+    <input type="range" id="speed" min="0.2" max="3" step="0.05" value="1.0">
+  </div>
+  <div class="row">
+    <label>Drift / evolution <span class="val" id="vDrift">0.40</span></label>
+    <input type="range" id="drift" min="0" max="2" step="0.05" value="0.4">
+  </div>
+  <div class="row">
+    <label>Trail length <span class="val" id="vFade">0.96</span></label>
+    <input type="range" id="fade" min="0.80" max="0.995" step="0.005" value="0.96">
+  </div>
+
+  <div class="row">
+    <label>Palette</label>
+    <div class="palettes" id="palettes"></div>
+  </div>
+
+  <div class="btns" style="margin-bottom:6px">
+    <button id="auto">◐ Auto</button>
+    <button id="sound">♪ Sound</button>
+  </div>
+  <div class="btns">
+    <button id="newField">New field</button>
+    <button id="clear">Clear</button>
+    <button id="save">Save PNG</button>
+  </div>
+  <button id="share">⛓ Copy share link</button>
+  <div class="sig">Driftfield · a generative toy by Claude</div>
+</div>
+
+<div id="toast"></div>
+
+<div class="hint" id="hint">
+  <b>Move</b> to steer · <b>Pin</b> tools to sculpt · <b>A</b> auto · <b>S</b> sound · <b>H</b> hide · <b>Space</b> new field
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const overlay = document.getElementById('o');
+  const octx = overlay.getContext('2d');
+
+  // ---------- Palettes (background + ordered ink colors) ----------
+  const PALETTES = [
+    { name: 'Aurora',   bg: '#070a12', colors: ['#39d0d8', '#52a0ff', '#7c83ff', '#b06aff', '#ff7ac6'] },
+    { name: 'Ember',    bg: '#0d0705', colors: ['#ffd166', '#ff9f45', '#f4623a', '#d83a56', '#7a1f3d'] },
+    { name: 'Botanica', bg: '#06100a', colors: ['#d8f3a3', '#9bd66e', '#4fb477', '#2a9d8f', '#1d6e6e'] },
+    { name: 'Mono',     bg: '#0a0a0a', colors: ['#ffffff', '#cfcfcf', '#9a9a9a', '#6a6a6a', '#3d3d3d'] },
+    { name: 'Sakura',   bg: '#100810', colors: ['#ffe0ef', '#ffb3d1', '#ff7eb6', '#c878d8', '#7b6cf0'] },
+    { name: 'Abyss',    bg: '#02040a', colors: ['#1b3a6b', '#2c6fb5', '#3fa9f5', '#7ad7ff', '#caf0ff'] },
+    { name: 'Magma',    bg: '#0a0204', colors: ['#fff3b0', '#ffae3b', '#ff5e3a', '#c81d4e', '#5a1846'] },
+    { name: 'Spectra',  bg: '#070710', colors: ['#ff5d8f', '#ffa45b', '#ffe66d', '#6bcb77', '#4d96ff'] },
+  ];
+  // A musical scale per palette (root MIDI note + pentatonic intervals)
+  const SCALES = [
+    { root: 57, steps: [0, 3, 5, 7, 10] }, // Aurora   — A minor pentatonic
+    { root: 50, steps: [0, 3, 5, 7, 10] }, // Ember    — D minor pentatonic
+    { root: 55, steps: [0, 2, 4, 7, 9] },  // Botanica — G major pentatonic
+    { root: 48, steps: [0, 3, 5, 7, 10] }, // Mono     — C minor pentatonic
+    { root: 52, steps: [0, 2, 4, 7, 9] },  // Sakura   — E major pentatonic
+    { root: 49, steps: [0, 3, 5, 7, 10] }, // Abyss    — C# minor pentatonic
+    { root: 53, steps: [0, 3, 5, 7, 10] }, // Magma    — F minor pentatonic
+    { root: 57, steps: [0, 2, 4, 7, 9] },  // Spectra  — A major pentatonic
+  ];
+
+  // ---------- State ----------
+  const params = {
+    count: 2400, scale: 1.4, speed: 1.0, drift: 0.4, fade: 0.96, palette: 0,
+  };
+  let W, H, DPR;
+  let particles = [];
+  let fieldSeed = Math.random() * 1000;
+  let zTime = 0;                 // evolving 3rd dimension of noise
+  const mouse = { x: -9999, y: -9999, active: false, repel: false };
+  let panelHidden = false;
+
+  let tool = 'steer';            // steer | attract | repel | vortex | erase
+  const nodes = [];              // pinned field influencers: {x,y,type,r,strength,pulse}
+  let frame = 0;
+  let activity = 0;              // smoothed measure of recycle events (drives audio + auto)
+
+  // ---------- Simplex-ish value noise (3D), self-contained ----------
+  // Classic permutation-based gradient noise (Perlin 3D).
+  const perm = new Uint8Array(512);
+  function seedNoise(seed) {
+    const p = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) p[i] = i;
+    // xorshift PRNG seeded
+    let s = (seed * 2654435761) >>> 0 || 1;
+    const rnd = () => {
+      s ^= s << 13; s >>>= 0;
+      s ^= s >> 17;
+      s ^= s << 5;  s >>>= 0;
+      return s / 4294967296;
+    };
+    for (let i = 255; i > 0; i--) {
+      const j = (rnd() * (i + 1)) | 0;
+      const t = p[i]; p[i] = p[j]; p[j] = t;
+    }
+    for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+  }
+  const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+  const lerp = (a, b, t) => a + t * (b - a);
+  function grad(h, x, y, z) {
+    h &= 15;
+    const u = h < 8 ? x : y;
+    const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+    return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+  }
+  function noise3(x, y, z) {
+    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+    x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+    const u = fade(x), v = fade(y), w = fade(z);
+    const A = perm[X] + Y, AA = perm[A] + Z, AB = perm[A + 1] + Z;
+    const B = perm[X + 1] + Y, BA = perm[B] + Z, BB = perm[B + 1] + Z;
+    return lerp(
+      lerp(
+        lerp(grad(perm[AA], x, y, z),     grad(perm[BA], x - 1, y, z), u),
+        lerp(grad(perm[AB], x, y - 1, z), grad(perm[BB], x - 1, y - 1, z), u), v),
+      lerp(
+        lerp(grad(perm[AA + 1], x, y, z - 1),     grad(perm[BA + 1], x - 1, y, z - 1), u),
+        lerp(grad(perm[AB + 1], x, y - 1, z - 1), grad(perm[BB + 1], x - 1, y - 1, z - 1), u), v),
+      w);
+  }
+
+  // ---------- Particle ----------
+  function spawn(p) {
+    p.x = Math.random() * W;
+    p.y = Math.random() * H;
+    p.life = 60 + Math.random() * 240;   // frames before recycle
+    p.age = 0;
+    p.col = Math.random();               // position along palette 0..1
+    p.px = p.x; p.py = p.y;
+    return p;
+  }
+  function rebuildParticles() {
+    particles = new Array(params.count);
+    for (let i = 0; i < params.count; i++) particles[i] = spawn({});
+  }
+
+  // ---------- Color helpers ----------
+  function hexToRgb(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  let palCache = [];
+  function buildPalCache() {
+    palCache = PALETTES[params.palette].colors.map(hexToRgb);
+  }
+  function colorAt(t) {
+    const c = palCache;
+    const n = c.length;
+    const f = Math.max(0, Math.min(0.9999, t)) * (n - 1);
+    const i = f | 0;
+    const k = f - i;
+    const a = c[i], b = c[Math.min(i + 1, n - 1)];
+    return [
+      (a[0] + (b[0] - a[0]) * k) | 0,
+      (a[1] + (b[1] - a[1]) * k) | 0,
+      (a[2] + (b[2] - a[2]) * k) | 0,
+    ];
+  }
+
+  // ---------- Resize ----------
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    overlay.width = W * DPR;
+    overlay.height = H * DPR;
+    overlay.style.width = W + 'px';
+    overlay.style.height = H + 'px';
+    octx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    paintBg();
+  }
+  function paintBg() {
+    ctx.fillStyle = PALETTES[params.palette].bg;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ---------- Main loop ----------
+  function step() {
+    // Fade trails toward background (creates the painterly fade)
+    const bg = hexToRgb(PALETTES[params.palette].bg);
+    ctx.fillStyle = `rgba(${bg[0]},${bg[1]},${bg[2]},${1 - params.fade})`;
+    ctx.fillRect(0, 0, W, H);
+
+    zTime += 0.0009 * params.drift;
+    const sc = params.scale * 0.0016;     // spatial frequency of the field
+    const spd = params.speed * 1.6;
+
+    ctx.lineWidth = 1.05;
+    ctx.lineCap = 'round';
+
+    const nNodes = nodes.length;
+    let recycles = 0;
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+
+      // flow angle from 3D noise
+      const a = noise3(p.x * sc, p.y * sc, zTime) * Math.PI * 3.0;
+      let vx = Math.cos(a) * spd;
+      let vy = Math.sin(a) * spd;
+
+      // pointer steering (only with the Steer tool)
+      if (mouse.active && tool === 'steer') {
+        const dx = p.x - mouse.x, dy = p.y - mouse.y;
+        const d2 = dx * dx + dy * dy;
+        const R = 150;
+        if (d2 < R * R) {
+          const d = Math.sqrt(d2) || 1;
+          const force = (1 - d / R);
+          const sign = mouse.repel ? 1 : -1;
+          vx += (dx / d) * force * 3.4 * sign;
+          vy += (dy / d) * force * 3.4 * sign;
+          if (!mouse.repel) {           // attract mode adds a swirl for nicer eddies
+            vx += (-dy / d) * force * 2.2;
+            vy += (dx / d) * force * 2.2;
+          }
+        }
+      }
+
+      // pinned field influencers
+      for (let n = 0; n < nNodes; n++) {
+        const nd = nodes[n];
+        const dx = p.x - nd.x, dy = p.y - nd.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < nd.r * nd.r) {
+          const d = Math.sqrt(d2) || 1;
+          const f = (1 - d / nd.r) * nd.strength;
+          if (nd.type === 'attract') {
+            vx -= (dx / d) * f * 3.2; vy -= (dy / d) * f * 3.2;
+            vx += (-dy / d) * f * 2.4; vy += (dx / d) * f * 2.4;
+          } else if (nd.type === 'repel') {
+            vx += (dx / d) * f * 4.2; vy += (dy / d) * f * 4.2;
+          } else { // vortex
+            vx += (-dy / d) * f * 4.4; vy += (dx / d) * f * 4.4;
+            vx -= (dx / d) * f * 0.6;  vy -= (dy / d) * f * 0.6;
+          }
+        }
+      }
+
+      p.px = p.x; p.py = p.y;
+      p.x += vx; p.y += vy;
+      p.age++;
+
+      // recycle off-screen or aged-out particles
+      if (p.x < 0 || p.x > W || p.y < 0 || p.y > H || p.age > p.life) {
+        spawn(p);
+        recycles++;
+        continue;
+      }
+
+      const [r, g, b] = colorAt(p.col);
+      // soften alpha at start/end of life for clean strokes
+      const lifeT = p.age / p.life;
+      const alpha = 0.16 + 0.30 * Math.sin(lifeT * Math.PI);
+      ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
+      ctx.beginPath();
+      ctx.moveTo(p.px, p.py);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+
+    frame++;
+    activity = activity * 0.92 + recycles * 0.08;
+
+    drawOverlay();
+    if (autoMode.on) autoTick();
+    audio.tick(activity);
+
+    requestAnimationFrame(step);
+  }
+
+  // ---------- Overlay: pin markers + tool cursor ----------
+  function drawOverlay() {
+    octx.clearRect(0, 0, W, H);
+    if (!nodes.length && !(mouse.active && tool !== 'steer')) return;
+
+    const COLORS = { attract: '138,200,255', repel: '255,120,120', vortex: '190,150,255' };
+    for (let i = 0; i < nodes.length; i++) {
+      const nd = nodes[i];
+      nd.pulse += 0.04;
+      const rgb = COLORS[nd.type];
+      const pr = 9 + Math.sin(nd.pulse) * 2;
+
+      // soft halo of influence
+      const g = octx.createRadialGradient(nd.x, nd.y, 0, nd.x, nd.y, nd.r);
+      g.addColorStop(0, `rgba(${rgb},0.05)`);
+      g.addColorStop(1, `rgba(${rgb},0)`);
+      octx.fillStyle = g;
+      octx.beginPath(); octx.arc(nd.x, nd.y, nd.r, 0, Math.PI * 2); octx.fill();
+
+      // core ring
+      octx.strokeStyle = `rgba(${rgb},0.85)`;
+      octx.lineWidth = 1.5;
+      octx.beginPath(); octx.arc(nd.x, nd.y, pr, 0, Math.PI * 2); octx.stroke();
+
+      // glyph: arrows in for attract, out for repel, spiral tick for vortex
+      octx.strokeStyle = `rgba(${rgb},0.9)`;
+      octx.lineWidth = 1.3;
+      if (nd.type === 'vortex') {
+        octx.beginPath(); octx.arc(nd.x, nd.y, pr - 4, nd.pulse, nd.pulse + 4.2); octx.stroke();
+      } else {
+        const dir = nd.type === 'attract' ? 1 : -1;
+        for (let k = 0; k < 4; k++) {
+          const ang = k * Math.PI / 2 + nd.pulse * 0.3;
+          const r1 = pr + 4, r2 = pr + 9;
+          const ax = Math.cos(ang), ay = Math.sin(ang);
+          octx.beginPath();
+          octx.moveTo(nd.x + ax * r2 * dir, nd.y + ay * r2 * dir);
+          octx.lineTo(nd.x + ax * r1 * dir, nd.y + ay * r1 * dir);
+          octx.stroke();
+        }
+      }
+    }
+
+    // ghost cursor showing where a pin would land
+    if (mouse.active && (tool === 'attract' || tool === 'repel' || tool === 'vortex')) {
+      const rgb = COLORS[tool];
+      octx.strokeStyle = `rgba(${rgb},0.5)`;
+      octx.setLineDash([3, 4]);
+      octx.lineWidth = 1.2;
+      octx.beginPath(); octx.arc(mouse.x, mouse.y, 11, 0, Math.PI * 2); octx.stroke();
+      octx.setLineDash([]);
+    }
+  }
+
+  // ---------- UI wiring ----------
+  const sliders = {};
+  function bindSlider(id, key, fmt, after) {
+    const el = document.getElementById(id);
+    const out = document.getElementById('v' + id[0].toUpperCase() + id.slice(1));
+    sliders[key] = { el, out, fmt };
+    const upd = () => {
+      params[key] = parseFloat(el.value);
+      if (out) out.textContent = fmt(params[key]);
+      if (after) after();
+    };
+    el.addEventListener('input', upd);
+    upd();
+  }
+  bindSlider('count', 'count', v => v | 0, rebuildParticles);
+  bindSlider('scale', 'scale', v => v.toFixed(2));
+  bindSlider('speed', 'speed', v => v.toFixed(2));
+  bindSlider('drift', 'drift', v => v.toFixed(2));
+  bindSlider('fade',  'fade',  v => v.toFixed(3));
+
+  // push current param values back into the slider DOM (used by auto-mode)
+  function syncSliders() {
+    for (const key in sliders) {
+      const s = sliders[key];
+      s.el.value = params[key];
+      if (s.out) s.out.textContent = s.fmt(params[key]);
+    }
+  }
+
+  // palette swatches
+  const palWrap = document.getElementById('palettes');
+  const swatches = [];
+  PALETTES.forEach((pal, idx) => {
+    const sw = document.createElement('div');
+    sw.className = 'swatch' + (idx === 0 ? ' active' : '');
+    sw.title = pal.name;
+    sw.style.background = `linear-gradient(135deg, ${pal.colors.join(', ')})`;
+    sw.addEventListener('click', () => setPalette(idx));
+    palWrap.appendChild(sw);
+    swatches.push(sw);
+  });
+  function setPalette(idx) {
+    params.palette = idx;
+    buildPalCache();
+    paintBg();
+    swatches.forEach((c, i) => c.classList.toggle('active', i === idx));
+    audio.setPalette(idx);
+  }
+  function cyclePalette() { setPalette((params.palette + 1) % PALETTES.length); }
+
+  function newField() {
+    fieldSeed = Math.random() * 100000;
+    seedNoise(fieldSeed);
+    zTime = Math.random() * 100;
+  }
+  document.getElementById('newField').addEventListener('click', newField);
+  document.getElementById('clear').addEventListener('click', () => { paintBg(); rebuildParticles(); });
+  document.getElementById('save').addEventListener('click', () => {
+    const link = document.createElement('a');
+    link.download = 'driftfield-' + Date.now() + '.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  });
+
+  // ---------- Pinned nodes ----------
+  const MAX_NODES = 48;
+  function placeNode(x, y, type) {
+    if (nodes.length >= MAX_NODES) nodes.shift();
+    nodes.push({ x, y, type, r: 150, strength: 1, pulse: Math.random() * 6.28 });
+    updatePins();
+    audio.pluck();              // a little sonic confirmation
+  }
+  function eraseNear(x, y) {
+    let best = -1, bd = 44 * 44;
+    for (let i = 0; i < nodes.length; i++) {
+      const dx = nodes[i].x - x, dy = nodes[i].y - y, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = i; }
+    }
+    if (best >= 0) { nodes.splice(best, 1); updatePins(); }
+  }
+  function clearPins() { nodes.length = 0; updatePins(); }
+  const pincount = document.getElementById('pincount');
+  function updatePins() {
+    pincount.innerHTML = nodes.length
+      ? `<b>${nodes.length}</b> pin${nodes.length > 1 ? 's' : ''} · erase tool to remove`
+      : 'no pins · <b>click</b> the field to place';
+  }
+
+  // ---------- Tool selector ----------
+  const toolWrap = document.getElementById('tools');
+  function setTool(t) {
+    tool = t;
+    [...toolWrap.children].forEach(el => el.classList.toggle('active', el.dataset.tool === t));
+    document.body.style.cursor = t === 'steer' ? 'crosshair' : (t === 'erase' ? 'not-allowed' : 'copy');
+  }
+  toolWrap.addEventListener('click', e => {
+    const el = e.target.closest('.tool');
+    if (el) setTool(el.dataset.tool);
+  });
+
+  // ---------- Auto / gallery mode ----------
+  const autoMode = { on: false, nextEvent: 0, targets: {} };
+  function pickTargets() {
+    autoMode.targets = {
+      scale: 0.5 + Math.random() * 2.8,
+      speed: 0.55 + Math.random() * 1.5,
+      drift: 0.2 + Math.random() * 1.2,
+      fade:  0.905 + Math.random() * 0.085,
+    };
+  }
+  function autoTick() {
+    const t = autoMode.targets, k = 0.014;
+    params.scale += (t.scale - params.scale) * k;
+    params.speed += (t.speed - params.speed) * k;
+    params.drift += (t.drift - params.drift) * k;
+    params.fade  += (t.fade  - params.fade)  * k;
+    syncSliders();
+    if (frame >= autoMode.nextEvent) {
+      autoMode.nextEvent = frame + 420 + Math.floor(Math.random() * 540); // ~7–16s
+      pickTargets();
+      const r = Math.random();
+      if (r < 0.45) newField();
+      else if (r < 0.72) cyclePalette();
+      else if (r < 0.82 && nodes.length < MAX_NODES) {
+        const types = ['attract', 'repel', 'vortex'];
+        placeNode(Math.random() * W, Math.random() * H, types[(Math.random() * 3) | 0]);
+      }
+    }
+  }
+  const autoBtn = document.getElementById('auto');
+  function toggleAuto() {
+    autoMode.on = !autoMode.on;
+    autoBtn.classList.toggle('on', autoMode.on);
+    if (autoMode.on) { pickTargets(); autoMode.nextEvent = frame + 240; }
+  }
+  autoBtn.addEventListener('click', toggleAuto);
+
+  // ---------- Generative ambient audio ----------
+  const audio = {
+    ac: null, on: false, master: null, padGain: null, filter: null,
+    delay: null, pads: [], last: 0, root: 57, scale: [0, 3, 5, 7, 10],
+    midi(m) { return 440 * Math.pow(2, (m - 69) / 12); },
+    ensure() {
+      if (this.ac) return;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const ac = this.ac = new AC();
+      const master = this.master = ac.createGain();
+      master.gain.value = 0.0001; master.connect(ac.destination);
+
+      const filter = this.filter = ac.createBiquadFilter();
+      filter.type = 'lowpass'; filter.frequency.value = 750; filter.Q.value = 1.4;
+      filter.connect(master);
+
+      // feedback delay for spaciousness
+      const delay = this.delay = ac.createDelay(1.0); delay.delayTime.value = 0.40;
+      const fb = ac.createGain(); fb.gain.value = 0.33;
+      const wet = ac.createGain(); wet.gain.value = 0.5;
+      delay.connect(fb); fb.connect(delay); delay.connect(wet); wet.connect(filter);
+
+      // slow filter sweep so the drone breathes
+      const lfo = ac.createOscillator(), lg = ac.createGain();
+      lfo.frequency.value = 0.04; lg.gain.value = 320;
+      lfo.connect(lg); lg.connect(filter.frequency); lfo.start();
+
+      // drone pad: detuned stack at root / fifth / octave
+      const padGain = this.padGain = ac.createGain(); padGain.gain.value = 0.05; padGain.connect(filter);
+      this.pads = [];
+      [0, 7, 12].forEach((interval, i) => {
+        const o = ac.createOscillator();
+        o.type = i === 0 ? 'sawtooth' : 'triangle';
+        o.detune.value = Math.random() * 8 - 4;
+        const g = ac.createGain(); g.gain.value = i === 0 ? 0.5 : 0.28;
+        o.connect(g); g.connect(padGain); o.start();
+        this.pads.push({ o, interval });
+      });
+      this.retune();
+    },
+    retune() {
+      if (!this.ac) return;
+      const now = this.ac.currentTime;
+      for (const p of this.pads) {
+        p.o.frequency.setTargetAtTime(this.midi(this.root + p.interval - 12), now, 0.5);
+      }
+    },
+    setPalette(i) {
+      const conf = SCALES[i % SCALES.length];
+      this.root = conf.root; this.scale = conf.steps;
+      this.retune();
+    },
+    pluck() {
+      const ac = this.ac;
+      if (!ac || !this.on) return;
+      const deg = this.scale[(Math.random() * this.scale.length) | 0];
+      const oct = 12 * (1 + ((Math.random() * 2) | 0));
+      const f = this.midi(this.root + deg + oct);
+      const o = ac.createOscillator();
+      o.type = Math.random() < 0.5 ? 'triangle' : 'sine';
+      o.frequency.value = f;
+      const g = ac.createGain();
+      const t = ac.currentTime;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.16, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 1.7);
+      o.connect(g); g.connect(this.filter); g.connect(this.delay);
+      o.start(t); o.stop(t + 1.8);
+    },
+    toggle() {
+      this.ensure();
+      if (this.ac.state === 'suspended') this.ac.resume();
+      this.on = !this.on;
+      const t = this.ac.currentTime;
+      this.master.gain.cancelScheduledValues(t);
+      this.master.gain.setTargetAtTime(this.on ? 0.42 : 0.0001, t, 0.6);
+      return this.on;
+    },
+    tick(act) {
+      if (!this.on || !this.ac) return;
+      const now = this.ac.currentTime;
+      const interval = Math.max(0.16, 0.7 - Math.min(act, 6) * 0.075);
+      if (now - this.last > interval) {
+        this.last = now;
+        if (Math.random() < 0.6) this.pluck();
+      }
+    },
+  };
+  const soundBtn = document.getElementById('sound');
+  function toggleSound() { soundBtn.classList.toggle('on', audio.toggle()); }
+  soundBtn.addEventListener('click', toggleSound);
+
+  // ---------- Pointer ----------
+  function setMouse(e) {
+    const t = e.touches ? e.touches[0] : e;
+    mouse.x = t.clientX; mouse.y = t.clientY; mouse.active = true;
+  }
+  function pointerDown(e) {
+    if (e.target.closest && e.target.closest('#panel')) return; // don't paint through the UI
+    setMouse(e);
+    if (tool === 'steer') { mouse.repel = true; }
+    else if (tool === 'erase') { eraseNear(mouse.x, mouse.y); }
+    else { placeNode(mouse.x, mouse.y, tool); }
+  }
+  window.addEventListener('mousemove', setMouse);
+  window.addEventListener('mousedown', pointerDown);
+  window.addEventListener('mouseup',   () => { mouse.repel = false; });
+  window.addEventListener('mouseleave',() => { mouse.active = false; });
+  window.addEventListener('touchstart', e => { if (!(e.target.closest && e.target.closest('#panel'))) pointerDown(e); }, { passive: true });
+  window.addEventListener('touchmove',  setMouse, { passive: true });
+  window.addEventListener('touchend',   () => { mouse.repel = false; mouse.active = false; });
+
+  // ---------- Keyboard ----------
+  const panel = document.getElementById('panel');
+  const TOOL_KEYS = { '1': 'steer', '2': 'attract', '3': 'repel', '4': 'vortex', '5': 'erase' };
+  window.addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    if (k === 'h') {
+      panelHidden = !panelHidden;
+      panel.classList.toggle('hidden', panelHidden);
+    } else if (e.code === 'Space') {
+      e.preventDefault();
+      newField();
+    } else if (k === 'c') {
+      paintBg();
+    } else if (k === 'a') {
+      toggleAuto();
+    } else if (k === 's') {
+      toggleSound();
+    } else if (k === 'x') {
+      clearPins();
+    } else if (TOOL_KEYS[e.key]) {
+      setTool(TOOL_KEYS[e.key]);
+    }
+  });
+
+  // fade the hint after a while
+  setTimeout(() => document.getElementById('hint').classList.add('fade'), 7000);
+
+  // ---------- Shareable state: a whole composition becomes one link ----------
+  const NODE_TYPES = ['attract', 'repel', 'vortex'];
+  function serializeState() {
+    return {
+      v: 1,
+      p: params.palette,
+      c: params.count,
+      s: +params.scale.toFixed(2),
+      sp: +params.speed.toFixed(2),
+      d: +params.drift.toFixed(2),
+      f: +params.fade.toFixed(3),
+      sd: Math.round(fieldSeed),
+      // pins stored as normalized coords so they restore on any screen size
+      n: nodes.map(nd => [
+        +(nd.x / W).toFixed(4),
+        +(nd.y / H).toFixed(4),
+        NODE_TYPES.indexOf(nd.type),
+      ]),
+    };
+  }
+  function applyState(st) {
+    if (!st || typeof st !== 'object') return;
+    if (typeof st.p === 'number' && PALETTES[st.p]) setPalette(st.p);
+    if (st.sd != null) { fieldSeed = st.sd; seedNoise(fieldSeed); }
+    if (st.c != null) params.count = st.c;
+    if (st.s != null) params.scale = st.s;
+    if (st.sp != null) params.speed = st.sp;
+    if (st.d != null) params.drift = st.d;
+    if (st.f != null) params.fade = st.f;
+    syncSliders();
+    rebuildParticles();
+    nodes.length = 0;
+    if (Array.isArray(st.n)) {
+      for (const a of st.n) {
+        nodes.push({
+          x: a[0] * W, y: a[1] * H,
+          type: NODE_TYPES[a[2]] || 'attract',
+          r: 150, strength: 1, pulse: Math.random() * 6.28,
+        });
+      }
+    }
+    updatePins();
+    paintBg();
+  }
+  function encodeState() { return encodeURIComponent(JSON.stringify(serializeState())); }
+  function restoreFromHash() {
+    const m = location.hash.match(/art=([^&]+)/);
+    if (!m) return;
+    try { applyState(JSON.parse(decodeURIComponent(m[1]))); } catch (e) { /* ignore bad links */ }
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    // fallback for file:// and other non-secure contexts
+    return new Promise((resolve, reject) => {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      try { document.execCommand('copy') ? resolve() : reject(); }
+      catch (e) { reject(e); }
+      document.body.removeChild(ta);
+    });
+  }
+  let toastTimer = null;
+  const toastEl = document.getElementById('toast');
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
+  }
+  document.getElementById('share').addEventListener('click', () => {
+    const hash = '#art=' + encodeState();
+    history.replaceState(null, '', hash);     // make the address bar itself shareable
+    const url = location.origin + location.pathname + hash;
+    copyText(url).then(
+      () => toast('Link copied — this exact field is now shareable'),
+      () => toast('Copy the URL from your address bar to share')
+    );
+  });
+
+  // ---------- Boot ----------
+  window.addEventListener('resize', resize);
+  seedNoise(fieldSeed);
+  buildPalCache();
+  resize();
+  rebuildParticles();
+  restoreFromHash();
+  step();
+})();
+</script>
+</body>
+</html>
